@@ -19,6 +19,7 @@ def parse_nodes(node_file):
     return nodes
 
 
+
 def construct_digraph(edges_file, cap):
     ''' Parse a list of weighted undirected edges.  Construct a weighted
     directed graph in which an undirected edge is represented with a pair of
