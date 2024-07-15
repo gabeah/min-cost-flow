@@ -28,7 +28,7 @@ def construct_digraph(edges_file):
     """
     
     #G = min_cost_flow.SimpleMinCostFlow()
-    G = nx.MultiDiGraph()
+    G = nx.DiGraph()
     idDict = dict()
     curID = 0
     default_capacity = 1
@@ -53,8 +53,7 @@ def construct_digraph(edges_file):
             #G.add_arc_with_capacity_and_unit_cost(idDict[node1], idDict[node2], default_capacity, w)
             #G.add_arc_with_capacity_and_unit_cost(idDict[node2], idDict[node1], default_capacity, w)
             
-            G.add_edge(idDict[node1], idDict[node2], cost = w, cap = default_capacity, flow = 0)
-            G.add_edge(idDict[node2], idDict[node1], cost = w, cap = default_capacity, flow = 0)
+            G.add_edge(idDict[node1], idDict[node2], cost = w, cap = default_capacity)
             
         idDict["maxID"] = curID
         return G, idDict
@@ -84,43 +83,71 @@ def add_sources_and_targets(G, sources, targets, idDict, flow):
         if source in idDict:
             print("found")
             #G.add_arc_with_capacity_and_unit_cost(idDict["source"],idDict[source], source_cap, source_weight)
-            G1.add_edge(idDict["source"], idDict[source], cost = source_weight, cap = source_cap, flow = 0)
+            G1.add_edge(idDict["source"], idDict[source], cost = source_weight, cap = source_cap)
             gen.append(idDict[source])
 
     for target in targets:
         print(target)
         if target in idDict:
             #G.add_arc_with_capacity_and_unit_cost(idDict[target],idDict["target"], target_cap, target_weight)
-            G1.add_edge(idDict["target"], idDict[target], cost = target_weight, cap = target_cap, flow = 0)
+            G1.add_edge(idDict["target"], idDict[target], cost = target_weight, cap = target_cap)
             tra.append(idDict[target])
             
     return G1, gen, tra
-
-def op1(G1):
-    sum_log = 0
-    for edge in G1.edges():
-        print(edge)
-        w = G1.get_edge_data(edge)[0]["cost"]
-        f = G1.get_edge_data(edge)[0]["flow"]
-        
-        sum_log += (0 - math.log(w)) * f
-        
-    return sum
-        
-def op2(G1, gam, idDict, gen):
-    s = idDict["source"]
-    sum_flow = sum(G1.get_edge_data(s,i)[0]("flow") for i in gen)
-    return gam * sum_flow
     
-     
+def prepare_variables(solver, G1, default_capacity):
+    flows = dict()
+    extras = 0
+    for edge in G1.edges():
+        if edge not in flows:
+            flows[edge] = solver.NumVar(0.0, default_capacity, f"Flows{edge}")
+            G1.get_edge_data(edge[0],edge[1])["flow"] = flows[edge]
+        else:
+            print("repeat")
+            print(edge)
+            extras += 1
+    print(f"We had {extras} repeat edges")
+    return flows
+    
+def prepare_constraints(solver, G1, idDict, flows):
+    constraints = []
+    for i,  node in enumerate(G1.nodes):
+        
+        in_edges = list(G1.in_edges(node))
+        out_edges = list(G1.out_edges(node))
+        
+        in_flow = 0
+        out_flow = 0
+        
+        
+        constraints.append(solver.Constraint(flow[j] for j in in_edges)
+        
+        for j in in_edges:
+            for k in out_edges:    
+                if j[0] == idDict["source"]:
+                    print(f"found edge {j} connecting to source")
+                elif k[1] == idDict["target"]:
+                    print(f"found edge {k} connecting to target")
+                else:
+                    constraints.append(solver.Constraint())
+                    
+        print("HI")
+        
+def prepare_objective(solver, G1, flows):
+    objective = solver.Objective()
 
 def responsenet(G, G1, flow, output, idDict, gamma, gen, tra):
     """ The NEW ILP solver for MinCostFlow, using glop.
     """
+    
+    # temporary value, will make it changable later
+    default_capacity = 1
 
     solver = pywraplp.Solver.CreateSolver("GLOP")
     if not solver:
         return
+    
+    flows = prepare_variables(solver, G1, default_capacity)
     
     gam = solver.NumVar(gamma, "gam")
     total_flow = solver.NumVar(0, solver.infinity(), "flow")
@@ -131,16 +158,25 @@ def responsenet(G, G1, flow, output, idDict, gamma, gen, tra):
     solver.Add((sum(G1.get_edge_data(s,i)[0]["flow"] for i in gen)-sum(G1.get_edge_data(j,t) for j in tra)) == 0)
     
     
+    for node in idDict:
+        for outgoing,incoming in node:
+            break
+            
+    
+    
 def main():
     
-    sources = parse_nodes("sources.txt")
-    targets = parse_nodes("targets.txt")
+    sources = parse_nodes("sources2.txt")
+    targets = parse_nodes("targets2.txt")
     
-    G, idDict = construct_digraph("edges.txt")
+    G, idDict = construct_digraph("edges2.txt")
     
     G1, gen, tra = add_sources_and_targets(G, sources, targets, idDict, 1)
     
-    return G, G1, idDict, gen, tra, sources, targets
+    # Temporary
+    solver = pywraplp.CreateSolver("GLOP")
+    
+    return G, G1, idDict, gen, tra, sources, targets, solver
     
     
     
