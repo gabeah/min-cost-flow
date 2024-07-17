@@ -49,9 +49,7 @@ def construct_digraph(edges_file):
                 curID += 1
             
             # Convert weight to integer, as google can't handle non-int weights
-            w = int(((1 - float(tokens[2])))*100)
-            #G.add_arc_with_capacity_and_unit_cost(idDict[node1], idDict[node2], default_capacity, w)
-            #G.add_arc_with_capacity_and_unit_cost(idDict[node2], idDict[node1], default_capacity, w)
+            w = float(tokens[2])
             
             G.add_edge(idDict[node1], idDict[node2], cost = w, cap = default_capacity)
             
@@ -82,18 +80,16 @@ def add_sources_and_targets(G, sources, targets, idDict, flow):
         print(source)
         if source in idDict:
             print("found")
-            #G.add_arc_with_capacity_and_unit_cost(idDict["source"],idDict[source], source_cap, source_weight)
             G1.add_edge(idDict["source"], idDict[source], cost = source_weight, cap = source_cap)
             gen.append(idDict[source])
 
     for target in targets:
         print(target)
         if target in idDict:
-            #G.add_arc_with_capacity_and_unit_cost(idDict[target],idDict["target"], target_cap, target_weight)
-            G1.add_edge(idDict["target"], idDict[target], cost = target_weight, cap = target_cap)
+            G1.add_edge(idDict[target], idDict["target"], cost = target_weight, cap = target_cap)
             tra.append(idDict[target])
             
-    return G1, gen, tra
+    return G1
     
 def prepare_variables(solver, G1, default_capacity):
     flows = dict()
@@ -107,36 +103,59 @@ def prepare_variables(solver, G1, default_capacity):
             print(edge)
             extras += 1
     print(f"We had {extras} repeat edges")
+    
+    print('**'*25)
+    print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
+    print('**'*25)
+    
     return flows
     
-def prepare_constraints(solver, G1, idDict, flows):
+def prepare_constraints(solver, G1):
     constraints = []
     for i,  node in enumerate(G1.nodes):
         
         in_edges = list(G1.in_edges(node))
         out_edges = list(G1.out_edges(node))
         
-        in_flow = 0
-        out_flow = 0
-        
-        
-        constraints.append(solver.Constraint(flow[j] for j in in_edges)
-        
-        for j in in_edges:
-            for k in out_edges:    
-                if j[0] == idDict["source"]:
-                    print(f"found edge {j} connecting to source")
-                elif k[1] == idDict["target"]:
-                    print(f"found edge {k} connecting to target")
-                else:
-                    constraints.append(solver.Constraint())
-                    
-        print("HI")
-        
-def prepare_objective(solver, G1, flows):
+        constraints.append(solver.Constraint(node,solver.infinity()))
+       
+        for u,v in in_edges:
+            assert v == node
+            constraints[i].SetCoefficient(G1[u][v]["flow"],1)
+            
+        for u,v in out_edges:
+            assert u == node
+            constraints[i].SetCoefficient(G1[u][v]["flow"],-1)
+            
+        constraints[i].SetBounds(0,0)
+    
+    print('**'*25)
+    print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
+    print('**'*25)
+    
+    return constraints
+            
+def prepare_objective(solver, G1, flows, gamma, s):
     objective = solver.Objective()
+    
+    for i,j in G1.edges():
+        
+        log_weight = (math.log(G1[i][j]["cost"])) * (-1)
+        
+        if i == s:
+            log_weight = log_weight - gamma  
+            print("adjusting for source")
+        objective.SetCoefficient(flows[i,j], log_weight) 
+    
+    objective.SetMinimization()
+    
+    return objective  
+    
+    print('**'*25)
+    print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
+    print('**'*25)
 
-def responsenet(G, G1, flow, output, idDict, gamma, gen, tra):
+def responsenet(G, G1, idDict, gamma, return_solver= False):
     """ The NEW ILP solver for MinCostFlow, using glop.
     """
     
@@ -147,36 +166,34 @@ def responsenet(G, G1, flow, output, idDict, gamma, gen, tra):
     if not solver:
         return
     
+    s = idDict["source"]
+    
     flows = prepare_variables(solver, G1, default_capacity)
+    constraints = prepare_constraints(solver, G1)
+    objective = prepare_objective(solver, G1, flows, gamma, s)
     
-    gam = solver.NumVar(gamma, "gam")
-    total_flow = solver.NumVar(0, solver.infinity(), "flow")
+    if return_solver:
+            return flows, constraints, objective, solver
+    else:
+        return None, None, None, solver
     
-    s,t = idDict["source"], idDict["target"]
-    
-    solver.Add(0 <= G1.get_edge_data(i,j)[0]["flow"] <= G1.get_edge_data(i,j)[0]["cap"] for i,j in G1.edges())
-    solver.Add((sum(G1.get_edge_data(s,i)[0]["flow"] for i in gen)-sum(G1.get_edge_data(j,t) for j in tra)) == 0)
-    
-    
-    for node in idDict:
-        for outgoing,incoming in node:
-            break
-            
-    
-    
+def write_output():
+    print("hi")    
+
 def main():
     
-    sources = parse_nodes("sources2.txt")
-    targets = parse_nodes("targets2.txt")
+    sources = parse_nodes("RN2_sources.txt")
+    targets = parse_nodes("RN2_targets.txt")
     
-    G, idDict = construct_digraph("edges2.txt")
+    gamma = 10
     
-    G1, gen, tra = add_sources_and_targets(G, sources, targets, idDict, 1)
+    G, idDict = construct_digraph("RN2_network.txt")
     
-    # Temporary
-    solver = pywraplp.CreateSolver("GLOP")
+    G1 = add_sources_and_targets(G, sources, targets, idDict, 1)
     
-    return G, G1, idDict, gen, tra, sources, targets, solver
+    flows, constraints, objective, solver = responsenet(G, G1, idDict, gamma, True)
+    
+    return G, G1, idDict, sources, targets, solver, flows, constraints, objective
     
     
     
