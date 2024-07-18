@@ -1,7 +1,5 @@
 # The beginning of the rewrite of responsenet
 
-import numpy as np
-from ortools.graph.python import min_cost_flow
 from ortools.linear_solver import pywraplp
 import argparse
 import networkx as nx
@@ -47,8 +45,9 @@ def construct_digraph(edges_file):
             if not node2 in idDict:
                 idDict[node2] = curID
                 curID += 1
-            
-            # Convert weight to integer, as google can't handle non-int weights
+           
+        # TODO: Add check for all weights to be between 0,1
+        #       Do an error if all weights are 1
             w = float(tokens[2])
             
             G.add_edge(idDict[node1], idDict[node2], cost = w, cap = default_capacity)
@@ -110,15 +109,18 @@ def prepare_variables(solver, G1, default_capacity):
     
     return flows
     
-def prepare_constraints(solver, G1):
+def prepare_constraints(solver, G1, idDict):
     constraints = []
     for i,  node in enumerate(G1.nodes):
         
         in_edges = list(G1.in_edges(node))
         out_edges = list(G1.out_edges(node))
         
+        if node == idDict["source"] or node == idDict["target"]:
+            continue
+        
         constraints.append(solver.Constraint(node,solver.infinity()))
-       
+        
         for u,v in in_edges:
             assert v == node
             constraints[i].SetCoefficient(G1[u][v]["flow"],1)
@@ -128,6 +130,16 @@ def prepare_constraints(solver, G1):
             constraints[i].SetCoefficient(G1[u][v]["flow"],-1)
             
         constraints[i].SetBounds(0,0)
+    
+    constraints.append(solver.Constraint(idDict["source"], solver.infinity()))
+    
+    for j,k in list(G1.out_edges(idDict["source"])):
+        constraints[-1].SetCoefficient(G1[j][k]["flow"],1)
+    for j,k in list(G1.in_edges(idDict["target"])):
+        constraints[-1].SetCoefficient(G1[j][k]["flow"],-1)
+        
+    constraints[-1].SetBounds(0,0)
+
     
     print('**'*25)
     print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
@@ -169,7 +181,7 @@ def responsenet(G, G1, idDict, gamma, return_solver= False):
     s = idDict["source"]
     
     flows = prepare_variables(solver, G1, default_capacity)
-    constraints = prepare_constraints(solver, G1)
+    constraints = prepare_constraints(solver, G1, idDict)
     objective = prepare_objective(solver, G1, flows, gamma, s)
     
     if return_solver:
@@ -177,17 +189,24 @@ def responsenet(G, G1, idDict, gamma, return_solver= False):
     else:
         return None, None, None, solver
     
-def write_output():
-    print("hi")    
+def write_output(status, G1, solver):
+    if status == pywraplp.Solver.OPTIMAL:
+        print("Solution:")
+        print(f"Objective value = {solver.Objective().Value():0.1f}")
+        for u,v in G1.edges:
+            if G1[u][v]["flow"].solution_value() > 0.0:
+                print(G1[u][v]["flow"],'-->',G1[u][v]["flow"].solution_value())
+    else:
+        print("The problem does not have an optimal solution.")    
 
 def main():
     
-    sources = parse_nodes("RN2_sources.txt")
-    targets = parse_nodes("RN2_targets.txt")
+    sources = parse_nodes("sources.txt")
+    targets = parse_nodes("targets.txt")
     
     gamma = 10
     
-    G, idDict = construct_digraph("RN2_network.txt")
+    G, idDict = construct_digraph("edges.txt")
     
     G1 = add_sources_and_targets(G, sources, targets, idDict, 1)
     
